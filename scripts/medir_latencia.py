@@ -6,7 +6,10 @@ from time import perf_counter
 
 import httpx
 
-LAUDO = "Paciente com dor torácica intensa e sudorese fria com suspeita de infarto"
+LAUDO = (
+    "Acute myocardial infarction with ST segment elevation and cardiogenic shock "
+    "requiring immediate coronary reperfusion therapy."
+)
 
 
 def medir_latencia(url: str, repeticoes: int) -> list[float]:

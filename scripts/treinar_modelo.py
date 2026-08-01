@@ -1,11 +1,15 @@
-"""Treina o modelo de triagem e salva o artefato em modelos/."""
+"""Treina o modelo de triagem, avalia no conjunto de teste e salva o artefato."""
 
-from triagem.modelo import salvar_modelo, treinar_modelo
+from triagem.modelo import avaliar_modelo, salvar_modelo, treinar_modelo
 
 
 def main() -> None:
-    """Treina o classificador e grava o arquivo .joblib."""
-    arquivo = salvar_modelo(treinar_modelo())
+    """Treina o classificador, imprime as métricas e grava o arquivo .joblib."""
+    modelo = treinar_modelo()
+    metricas = avaliar_modelo(modelo)
+    print(f"Acurácia: {metricas['acuracia']:.4f}")
+    print(f"F1 macro: {metricas['f1_macro']:.4f}")
+    arquivo = salvar_modelo(modelo)
     print(f"Modelo salvo em {arquivo}")
 
 

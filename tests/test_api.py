@@ -14,7 +14,7 @@ def test_endpoint_de_saude():
 
 
 def test_classificar_retorna_urgencia_e_confianca():
-    laudo = {"texto": "Radiografia de tórax sem alterações"}
+    laudo = {"texto": "Chest radiograph showing no significant abnormalities."}
     resposta = cliente.post("/classificar", json=laudo)
     assert resposta.status_code == 200
     corpo = resposta.json()

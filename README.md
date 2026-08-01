@@ -9,17 +9,20 @@ Etapa 1 — Decisão Arquitetural e API Inicial.
 ```text
 .
 ├── dados/
-│   └── laudos.csv            ← Amostra rotulada de laudos (texto + urgência)
+│   ├── laudos.csv            ← Conjunto de treino (11.550 laudos rotulados)
+│   └── laudos_teste.csv      ← Conjunto de teste (2.888 laudos rotulados)
 ├── modelos/                  ← Modelo serializado (gerado pelo treino, fora do git)
 ├── scripts/
-│   ├── treinar_modelo.py     ← Treina o classificador e salva o .joblib
+│   ├── baixar_dataset.py     ← Baixa o corpus público e gera os CSVs
+│   ├── treinar_modelo.py     ← Treina, avalia e salva o .joblib
 │   └── medir_latencia.py     ← Mede a latência baseline da API
 ├── src/
 │   └── triagem/
 │       ├── api.py            ← API FastAPI com os endpoints /saude e /classificar
 │       ├── esquemas.py       ← Contratos de entrada e saída (Pydantic)
-│       └── modelo.py         ← Treino, persistência e inferência do modelo
+│       └── modelo.py         ← Treino, avaliação, persistência e inferência
 ├── tests/
+│   ├── conftest.py           ← Fixture do modelo compartilhada
 │   ├── test_api.py           ← Testes dos endpoints
 │   └── test_modelo.py        ← Testes do classificador
 ├── .dockerignore
@@ -33,11 +36,14 @@ Etapa 1 — Decisão Arquitetural e API Inicial.
 
 ## 2) O que cada arquivo principal faz
 
-- `dados/laudos.csv`
-  Amostra de 60 laudos rotulados em três níveis de urgência (`normal`, `atencao`, `urgente`), usada para treinar o baseline desta etapa.
+- `dados/laudos.csv` e `dados/laudos_teste.csv`
+  Laudos rotulados em três níveis de urgência (`normal`, `atencao`, `urgente`), gerados a partir do corpus público descrito na seção 6.
+
+- `scripts/baixar_dataset.py`
+  Baixa o Medical Abstracts TC Corpus e converte os rótulos originais nos três níveis de urgência.
 
 - `src/triagem/modelo.py`
-  Pipeline do scikit-learn com TF-IDF (unigramas e bigramas) + Regressão Logística. Expõe `treinar_modelo`, `salvar_modelo`, `carregar_modelo` e `classificar_laudo`.
+  Pipeline do scikit-learn com TF-IDF (unigramas e bigramas) + Regressão Logística. Expõe `treinar_modelo`, `avaliar_modelo`, `salvar_modelo`, `carregar_modelo` e `classificar_laudo`.
 
 - `src/triagem/esquemas.py`
   Modelos Pydantic `LaudoEntrada` (texto do laudo) e `ClassificacaoSaida` (urgência, confiança e tempo de inferência).
@@ -46,7 +52,7 @@ Etapa 1 — Decisão Arquitetural e API Inicial.
   Aplicação FastAPI. Carrega o modelo uma única vez na subida do serviço e responde em `GET /saude` e `POST /classificar`.
 
 - `scripts/treinar_modelo.py`
-  Treina o classificador e grava `modelos/modelo.joblib`.
+  Treina o classificador, imprime acurácia e F1 macro no conjunto de teste e grava `modelos/modelo.joblib`.
 
 - `scripts/medir_latencia.py`
   Dispara requisições sequenciais contra a API e imprime média, P50, P95 e P99 do tempo de resposta.
@@ -94,13 +100,25 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 4.4 Treinar o modelo
+### 4.4 (Opcional) Regerar os dados
+
+Os CSVs já estão versionados no repositório. Para baixar o corpus original novamente:
+```bash
+python scripts/baixar_dataset.py
+```
+
+### 4.5 Treinar o modelo
 ```bash
 python scripts/treinar_modelo.py
 ```
-*Saída esperada:* `Modelo salvo em .../modelos/modelo.joblib`
+*Saída esperada:*
+```text
+Acurácia: 0.6139
+F1 macro: 0.6104
+Modelo salvo em .../modelos/modelo.joblib
+```
 
-### 4.5 Subir a API localmente
+### 4.6 Subir a API localmente
 ```bash
 uvicorn triagem.api:app --host 127.0.0.1 --port 8000
 ```
@@ -113,7 +131,7 @@ A API fica disponível em:
 **Exemplo de requisição:**
 ```json
 {
-  "texto": "Paciente com dor torácica intensa e sudorese fria com suspeita de infarto"
+  "texto": "Acute myocardial infarction with ST segment elevation and cardiogenic shock requiring immediate coronary reperfusion therapy."
 }
 ```
 
@@ -121,31 +139,33 @@ A API fica disponível em:
 ```json
 {
   "urgencia": "urgente",
-  "confianca": 0.6349,
-  "tempo_ms": 1.42
+  "confianca": 0.6694,
+  "tempo_ms": 1.82
 }
 ```
 
-### 4.6 Subir a API via Docker
+> O corpus usado no treino é composto por textos médicos em inglês (seção 6), então o modelo espera laudos nesse idioma.
+
+### 4.7 Subir a API via Docker
 ```bash
 docker build -t triagem-laudos .
 docker run --rm -p 8000:8000 triagem-laudos
 ```
-A API fica exposta da mesma forma em `http://127.0.0.1:8000`.
+A API fica exposta da mesma forma em `http://127.0.0.1:8000`. O modelo é treinado durante o build, então o container já sobe pronto para servir.
 
-### 4.7 Medir a latência baseline
+### 4.8 Medir a latência baseline
 Com a API rodando (local ou em Docker), em outro terminal:
 ```bash
 python scripts/medir_latencia.py --repeticoes 200
 ```
 
-### 4.8 Rodar os testes
+### 4.9 Rodar os testes
 ```bash
 pytest
 ```
 *Saída esperada:* 6 passed.
 
-### 4.9 Rodar o linter
+### 4.10 Rodar o linter
 ```bash
 ruff check .
 ```
@@ -157,7 +177,8 @@ ruff check .
 | Comando | Descrição |
 |---|---|
 | `pip install -e ".[dev]"` | Instala as dependências de execução e desenvolvimento |
-| `python scripts/treinar_modelo.py` | Treina o classificador e salva o artefato |
+| `python scripts/baixar_dataset.py` | Baixa o corpus público e regera os CSVs |
+| `python scripts/treinar_modelo.py` | Treina o classificador, avalia e salva o artefato |
 | `uvicorn triagem.api:app --port 8000` | Sobe a API localmente |
 | `docker build -t triagem-laudos .` | Constrói a imagem do serviço de inferência |
 | `docker run --rm -p 8000:8000 triagem-laudos` | Sobe a API no container |
@@ -167,9 +188,46 @@ ruff check .
 
 ---
 
-## 6) Decisão arquitetural de deploy em nuvem
+## 6) Dataset e rótulos de urgência
 
-### 6.1 Batch ou tempo real?
+### 6.1 Origem
+
+O projeto usa o **Medical Abstracts TC Corpus**, um dos datasets sugeridos no enunciado, disponível publicamente em [sebischair/Medical-Abstracts-TC-Corpus](https://github.com/sebischair/Medical-Abstracts-TC-Corpus) sob licença **CC BY-SA 3.0**. São 14.438 resumos clínicos em inglês, divididos em 11.550 amostras de treino e 2.888 de teste — acima do mínimo de 2.000 pedido no desafio.
+
+O `scripts/baixar_dataset.py` baixa o corpus original e grava os arquivos já no formato consumido pelo treino (`texto`, `urgencia`).
+
+### 6.2 De condição clínica para nível de urgência
+
+O corpus rotula a **condição médica** descrita no texto, em cinco categorias. Como o objetivo do sistema é triagem por urgência, as categorias foram agrupadas em três níveis segundo a janela de tempo típica para conduta clínica:
+
+| Categoria original | Nível de urgência | Racional |
+|---|---|---|
+| Cardiovascular diseases | `urgente` | Eventos agudos com janela terapêutica curta (ex.: infarto) |
+| Nervous system diseases | `urgente` | Quadros neurológicos agudos onde o atraso agrava sequelas (ex.: AVC) |
+| Neoplasms | `atencao` | Investigação prioritária, mas sem emergência imediata |
+| Digestive system diseases | `atencao` | Acompanhamento prioritário na maior parte dos casos |
+| General pathological conditions | `normal` | Achados inespecíficos, encaminhados para rotina |
+
+> **Transparência:** esse agrupamento é uma aproximação didática feita neste projeto, não um protocolo clínico validado. Ele serve para exercitar o ciclo de vida do modelo (deploy, CI/CD, monitoramento e latência), que é o foco do desafio. Em um cenário real, os rótulos de urgência viriam da classificação de risco feita pela própria instituição.
+
+O agrupamento resultou em classes equilibradas: 3.981 `urgente`, 3.844 `normal` e 3.725 `atencao`.
+
+### 6.3 Desempenho do baseline
+
+Modelo TF-IDF (unigramas e bigramas, 50 mil features) + Regressão Logística com `class_weight="balanced"`, avaliado nas 2.888 amostras de teste:
+
+| Métrica | Resultado |
+|---|---|
+| Acurácia | 0,6139 |
+| F1 macro | 0,6104 |
+
+Com três classes equilibradas, o acaso ficaria em torno de 0,33. O baseline não é o objetivo desta etapa — a modelagem e a otimização são tratadas na Etapa 4 —, mas dá o ponto de partida honesto para comparação.
+
+---
+
+## 7) Decisão arquitetural de deploy em nuvem
+
+### 7.1 Batch ou tempo real?
 
 A triagem existe para reduzir o tempo entre a liberação do laudo e a leitura por um médico. Um laudo com suspeita de infarto classificado como `urgente` só tem valor clínico se a informação chegar em segundos — processar em lote de hora em hora anularia o ganho do sistema.
 
@@ -182,7 +240,7 @@ Por isso a escolha é **inferência em tempo real (síncrona) via API REST**, co
 | Integração com o HIS/RIS | Arquivos agendados | Chamada HTTP no momento da liberação do laudo |
 | Custo | Menor por volume | Adequado, o modelo é leve (TF-IDF + Regressão Logística) |
 
-### 6.2 Nuvem e serviços escolhidos
+### 7.2 Nuvem e serviços escolhidos
 
 A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com Fargate** atrás de um **Application Load Balancer**:
 
@@ -194,7 +252,7 @@ A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com F
 
 **Por que Fargate e não Lambda ou EC2:** o Lambda sofreria com cold start no carregamento do modelo e o EC2 exigiria gerenciar as instâncias. O Fargate mantém o container quente, escala por demanda e roda exatamente a mesma imagem Docker validada localmente e no CI — o que preserva a paridade entre os ambientes e sustenta as etapas seguintes (CI/CD, Airflow e observabilidade).
 
-### 6.3 Fluxo da requisição
+### 7.3 Fluxo da requisição
 
 ```text
 HIS/RIS do hospital
@@ -210,20 +268,20 @@ O modelo é carregado uma única vez na inicialização do container e reaprovei
 
 ---
 
-## 7) Latência baseline (Etapa 1)
+## 8) Latência baseline (Etapa 1)
 
-Medição feita com `scripts/medir_latencia.py`, 200 requisições sequenciais em um laudo de exemplo com 76 caracteres:
+Medição feita com `scripts/medir_latencia.py` contra o **container Docker**, com 200 requisições sequenciais em um laudo de exemplo de 133 caracteres:
 
 | Métrica | Resultado |
 |---|---|
-| Média | 2,48 ms |
-| P50 | 2,46 ms |
-| P95 | 3,38 ms |
-| P99 | 4,15 ms |
+| Média | 3,99 ms |
+| P50 | 3,80 ms |
+| P95 | 5,72 ms |
+| P99 | 7,31 ms |
 
-O tempo inclui a ida e volta HTTP; a inferência pura (campo `tempo_ms` da resposta) fica abaixo de 2 ms, porque o modelo já está carregado em memória.
+O tempo medido inclui a ida e volta HTTP. A inferência pura (campo `tempo_ms` da resposta) fica em torno de 1,8 ms, porque o modelo é carregado uma única vez na subida do container e reaproveitado entre as requisições.
 
-Para repetir a medição com a API dentro do container:
+Para reproduzir:
 ```bash
 docker build -t triagem-laudos .
 docker run --rm -p 8000:8000 triagem-laudos
@@ -234,18 +292,19 @@ Esse é o número de referência que será comparado na Etapa 4, depois da otimi
 
 ---
 
-## 8) Checklist da Etapa 1
+## 9) Checklist da Etapa 1
 
-1. [x] **Decisão arquitetural documentada:** análise batch vs. tempo real e escolha da stack de deploy em nuvem (seção 6).
+1. [x] **Decisão arquitetural documentada:** análise batch vs. tempo real e escolha da stack de deploy em nuvem (seção 7).
 2. [x] **API FastAPI:** recebe o texto do laudo e retorna a classificação de urgência.
-3. [x] **Modelo de classificação de texto:** TF-IDF + Regressão Logística com scikit-learn.
-4. [x] **Container Docker funcional:** imagem que já sobe com o modelo treinado.
-5. [x] **Baseline de latência medido:** script de medição e resultados registrados (seção 7).
-6. [x] **Testes e lint:** 6 testes com pytest e verificação com ruff.
+3. [x] **Dataset público:** Medical Abstracts TC Corpus com 14.438 amostras, sugerido no enunciado (seção 6).
+4. [x] **Modelo de classificação de texto:** TF-IDF + Regressão Logística com scikit-learn.
+5. [x] **Container Docker funcional:** imagem que já sobe com o modelo treinado.
+6. [x] **Baseline de latência medido:** medição feita no container e registrada (seção 8).
+7. [x] **Testes e lint:** 6 testes com pytest e verificação com ruff.
 
 ---
 
-## 9) Dependências
+## 10) Dependências
 
 **Execução:**
 - `fastapi`, `uvicorn[standard]`, `pydantic`
@@ -258,7 +317,7 @@ Esse é o número de referência que será comparado na Etapa 4, depois da otimi
 
 ---
 
-## 10) Próximas etapas
+## 11) Próximas etapas
 
 - **Etapa 2:** workflow de CI/CD no GitHub Actions (lint e testes) e DAG do Airflow para o pipeline de treino.
 - **Etapa 3:** instrumentação com `prometheus_client` e stack de monitoramento (API + Prometheus + Grafana) via Docker Compose.
