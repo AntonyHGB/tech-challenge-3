@@ -1,6 +1,6 @@
-# ML Tech Challenge — Fase 3 (Classificação de Laudos Médicos)
+﻿# ML Tech Challenge — Fase 3 (Classificação de Laudos Médicos)
 
-Etapa 1 — Decisão Arquitetural e API Inicial.
+Etapas 1 e 2 — API em Docker, CI/CD no GitHub Actions e pipeline de treino no Airflow.
 
 ---
 
@@ -8,7 +8,11 @@ Etapa 1 — Decisão Arquitetural e API Inicial.
 
 ```text
 .
+├── .github/workflows/
+│   └── ci.yml                ← Pipeline de CI (lint, testes e build)
 ├── dados/                    ← Corpus público, no formato original
+├── dags/
+│   └── treino_laudos.py      ← DAG do Airflow com o pipeline de treino
 ├── modelos/                  ← Modelo serializado (gerado pelo treino, fora do git)
 ├── scripts/
 │   ├── baixar_dataset.py     ← Baixa o corpus
@@ -20,6 +24,7 @@ Etapa 1 — Decisão Arquitetural e API Inicial.
 │       └── modelo.py         ← Treino, avaliação e inferência
 ├── tests/
 │   └── test_triagem.py       ← 6 testes do modelo e da API
+├── docker-compose.airflow.yml
 ├── Dockerfile
 ├── pyproject.toml
 └── README.md
@@ -113,9 +118,56 @@ ruff check .
 
 ---
 
-## 4) Decisão arquitetural de deploy em nuvem
+## 4) CI/CD e pipeline de treino (Etapa 2)
 
-### 4.1 Batch ou tempo real?
+### 4.1 GitHub Actions
+
+O workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) roda a cada push e pull request na `main`, com três automações:
+
+| Job | Comando | Papel |
+|---|---|---|
+| `lint` | `ruff check .` | Verificação de código |
+| `testes` | `pytest` | Os 6 testes do modelo e da API |
+| `build` | `docker build` | Garante que a imagem continua construindo |
+
+O `build` só roda se lint e testes passarem. Como os dados estão versionados no repositório, o pipeline executa sem rede externa e sem segredos configurados — a imagem é construída para validação, não publicada.
+
+### 4.2 DAG do Airflow
+
+A DAG [dags/treino_laudos.py](dags/treino_laudos.py) reproduz o ciclo de treino em três tasks, reaproveitando as mesmas funções que a API usa:
+
+```text
+carregar_dados  →  treinar  →  salvar_modelo
+ (lê o CSV e       (TF-IDF +   (avalia e promove
+  conta laudos)     LogReg)     para modelo.joblib)
+```
+
+A task `treinar` grava em um arquivo temporário e só a `salvar_modelo` promove o resultado para `modelos/modelo.joblib`, depois de calcular as métricas. Assim uma execução que falhe no meio não corrompe o modelo que a API está servindo.
+
+**Subir o Airflow:**
+```bash
+docker compose -f docker-compose.airflow.yml up -d
+```
+
+A interface fica em `http://localhost:8080`. O usuário é `admin` e a senha é gerada na primeira subida — procure pela linha `Password for user 'admin'` na saída de:
+```bash
+docker compose -f docker-compose.airflow.yml logs airflow
+```
+
+**Executar a DAG pela linha de comando:**
+```bash
+docker compose -f docker-compose.airflow.yml exec airflow airflow dags test treino_laudos
+```
+
+O Airflow roda em um único container (`apache/airflow:3.3.0` em modo standalone, com SQLite), suficiente para esta DAG e bem mais simples de subir que o compose oficial de seis serviços. As pastas `src/`, `dados/` e `modelos/` são montadas como volumes, então a DAG usa o mesmo código da API, sem duplicar a lógica de treino.
+
+> O `apache-airflow` não faz parte das dependências do projeto: ele não roda nativamente no Windows e pesaria o CI sem necessidade. A DAG é executada no container.
+
+---
+
+## 5) Decisão arquitetural de deploy em nuvem
+
+### 5.1 Batch ou tempo real?
 
 A classificação existe para reduzir o tempo entre a liberação do laudo e a leitura por um médico. Um laudo que sinaliza um quadro cardiovascular agudo só tem valor clínico se a informação chegar em segundos — processar em lote de hora em hora anularia o ganho do sistema.
 
@@ -128,7 +180,7 @@ Por isso a escolha é **inferência em tempo real (síncrona) via API REST**, co
 | Integração com o HIS/RIS | Arquivos agendados | Chamada HTTP na liberação do laudo |
 | Custo | Menor por volume | Adequado, o modelo é leve |
 
-### 4.2 Nuvem e serviços escolhidos
+### 5.2 Nuvem e serviços escolhidos
 
 A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com Fargate** atrás de um **Application Load Balancer**:
 
@@ -140,7 +192,7 @@ A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com F
 
 **Por que Fargate e não Lambda ou EC2:** o Lambda sofreria com cold start no carregamento do modelo e o EC2 exigiria gerenciar as instâncias. O Fargate mantém o container quente, escala por demanda e roda exatamente a mesma imagem Docker validada localmente e no CI — o que preserva a paridade entre os ambientes e sustenta as etapas seguintes.
 
-### 4.3 Fluxo da requisição
+### 5.3 Fluxo da requisição
 
 ```text
 HIS/RIS do hospital
@@ -156,7 +208,7 @@ O modelo é carregado uma única vez na inicialização do container e reaprovei
 
 ---
 
-## 5) Resultados
+## 6) Resultados
 
 **Modelo** — TF-IDF + Regressão Logística, avaliado nas 2.888 amostras de teste:
 
@@ -180,20 +232,26 @@ O tempo inclui a ida e volta HTTP; a inferência pura (campo `tempo_ms` da respo
 
 ---
 
-## 6) Checklist da Etapa 1
+## 7) Checklist
 
-1. [x] **Decisão arquitetural documentada:** batch vs. tempo real e stack de deploy em nuvem (seção 4).
+**Etapa 1**
+
+1. [x] **Decisão arquitetural documentada:** batch vs. tempo real e stack de deploy em nuvem (seção 5).
 2. [x] **API FastAPI:** recebe o texto do laudo e retorna a classificação.
 3. [x] **Dataset público:** Medical Abstracts TC Corpus, no formato original (seção 2).
 4. [x] **Modelo de classificação de texto:** TF-IDF + Regressão Logística com scikit-learn.
 5. [x] **Container Docker funcional:** imagem que já sobe com o modelo treinado.
-6. [x] **Baseline de latência medido:** medição feita no container (seção 5).
-7. [x] **Testes e lint:** 6 testes com pytest e verificação com ruff.
+6. [x] **Baseline de latência medido:** medição feita no container (seção 6).
+
+**Etapa 2**
+
+7. [x] **CI/CD com pelo menos 2 automações:** lint, testes e build da imagem no GitHub Actions.
+8. [x] **DAG do Airflow funcional:** carregamento de dados → treino → salvamento do modelo.
+9. [x] **Testes e lint:** 6 testes com pytest e verificação com ruff, executados a cada push.
 
 ---
 
-## 7) Próximas etapas
+## 8) Próximas etapas
 
-- **Etapa 2:** GitHub Actions (lint e testes) e DAG do Airflow para o pipeline de treino.
 - **Etapa 3:** instrumentação com `prometheus_client` e stack de monitoramento via Docker Compose.
 - **Etapa 4:** otimização de latência com ONNX Runtime, comparativo com este baseline e vídeo STAR.

@@ -1,0 +1,16 @@
+services:
+  airflow:
+    image: apache/airflow:3.3.0
+    command: standalone
+    ports:
+      - "8080:8080"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # O pacote triagem é lido de src/, junto com dados/ e modelos/.
+      PYTHONPATH: /opt/airflow/src
+      _PIP_ADDITIONAL_REQUIREMENTS: "scikit-learn joblib"
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./dados:/opt/airflow/dados
+      - ./modelos:/opt/airflow/modelos
