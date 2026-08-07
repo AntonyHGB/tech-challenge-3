@@ -1,9 +1,12 @@
 .git
+.github
 .venv
 __pycache__
 *.pyc
 .pytest_cache
 .ruff_cache
+dags
+docker-compose*.yml
 modelos
 tests
 *.pdf
