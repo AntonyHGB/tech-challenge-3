@@ -1,7 +1,7 @@
 [project]
 name = "triagem-laudos"
 version = "0.1.0"
-description = "Triagem automática de urgência em laudos médicos (Tech Challenge Fase 03)."
+description = "Classificação automática de condições médicas em laudos (Tech Challenge Fase 03)."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
