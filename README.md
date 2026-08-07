@@ -38,6 +38,8 @@ O projeto usa o **Medical Abstracts TC Corpus**, um dos datasets sugeridos no en
 
 São 14.438 resumos clínicos em inglês — 11.550 de treino e 2.888 de teste — rotulados em cinco condições: *neoplasms*, *digestive system diseases*, *nervous system diseases*, *cardiovascular diseases* e *general pathological conditions*. Os arquivos são usados exatamente como distribuídos pelos autores, sem reagrupar classes nem reamostrar.
 
+O corpus classifica **condição médica**, e não nível de urgência como no exemplo do enunciado — uso confirmado como aceito pela coordenação do curso no Discord da turma.
+
 As classes são desbalanceadas (de 1.195 a 3.844 amostras no treino), então o classificador usa `class_weight="balanced"`, que dá peso maior às classes menos frequentes durante o treino.
 
 ---

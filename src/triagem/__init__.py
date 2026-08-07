@@ -1,1 +1,1 @@
-"""Triagem automática de urgência em laudos médicos."""
+"""Classificação automática de condições médicas em laudos."""
