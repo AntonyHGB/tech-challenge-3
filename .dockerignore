@@ -7,6 +7,7 @@ __pycache__
 .ruff_cache
 dags
 docker-compose*.yml
+monitoramento
 modelos
 tests
 *.pdf
