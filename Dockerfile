@@ -14,6 +14,10 @@ COPY scripts ./scripts
 RUN pip install --no-cache-dir -e . \
     && python scripts/treinar_modelo.py
 
+# A API roda com usuário sem privilégios; o modelo já foi treinado no build.
+RUN useradd --create-home triagem && chown -R triagem:triagem /app
+USER triagem
+
 EXPOSE 8000
 
 CMD ["uvicorn", "triagem.api:app", "--host", "0.0.0.0", "--port", "8000"]

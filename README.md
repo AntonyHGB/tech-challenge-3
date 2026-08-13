@@ -27,6 +27,7 @@ Etapas 1, 2 e 3 — API em Docker, CI/CD no GitHub Actions, pipeline de treino n
 │       └── modelo.py         ← Treino, avaliação e inferência
 ├── tests/
 │   └── test_triagem.py       ← 7 testes do modelo e da API
+├── .env.example              ← Modelo das variáveis de ambiente (copiar para .env)
 ├── docker-compose.yml        ← Stack de monitoramento (API + Prometheus + Grafana)
 ├── docker-compose.airflow.yml
 ├── Dockerfile
@@ -186,6 +187,12 @@ As métricas ficam expostas em `GET /metricas`, no formato do Prometheus.
 
 ### 5.2 Subir a stack
 
+Antes da primeira subida, crie o `.env` com as credenciais do Grafana (o arquivo fica fora do git):
+
+```bash
+cp .env.example .env
+```
+
 ```bash
 docker compose up -d --build
 ```
@@ -194,7 +201,9 @@ docker compose up -d --build
 |---|---|---|
 | API | `http://localhost:8000` | — |
 | Prometheus | `http://localhost:9090` | — |
-| Grafana | `http://localhost:3001` | `admin` / `admin` |
+| Grafana | `http://localhost:3001` | definidas no `.env` |
+
+Sem o `.env`, o compose se recusa a subir — não existe senha padrão embutida no repositório.
 
 > O Grafana usa a porta 3001 no host para não conflitar com outros serviços comuns na 3000. O Prometheus raspa a API a cada 5 segundos pelo endereço interno `api:8000`.
 
