@@ -46,3 +46,11 @@ def test_endpoint_de_classificacao():
 def test_texto_vazio_e_rejeitado():
     resposta = cliente.post("/classificar", json={"texto": ""})
     assert resposta.status_code == 422
+
+
+def test_endpoint_de_metricas():
+    cliente.post("/classificar", json={"texto": LAUDO})
+    resposta = cliente.get("/metricas")
+    assert resposta.status_code == 200
+    assert "triagem_requisicoes_total" in resposta.text
+    assert "triagem_latencia_segundos" in resposta.text

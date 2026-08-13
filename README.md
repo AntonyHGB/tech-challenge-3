@@ -1,6 +1,6 @@
 ﻿# ML Tech Challenge — Fase 3 (Classificação de Laudos Médicos)
 
-Etapas 1 e 2 — API em Docker, CI/CD no GitHub Actions e pipeline de treino no Airflow.
+Etapas 1, 2 e 3 — API em Docker, CI/CD no GitHub Actions, pipeline de treino no Airflow e monitoramento com Prometheus e Grafana.
 
 ---
 
@@ -14,16 +14,21 @@ Etapas 1 e 2 — API em Docker, CI/CD no GitHub Actions e pipeline de treino no 
 ├── dags/
 │   └── treino_laudos.py      ← DAG do Airflow com o pipeline de treino
 ├── modelos/                  ← Modelo serializado (gerado pelo treino, fora do git)
+├── monitoramento/
+│   ├── prometheus.yml        ← Configuração de scrape do Prometheus
+│   └── grafana/              ← Datasource e dashboard provisionados
 ├── scripts/
 │   ├── baixar_dataset.py     ← Baixa o corpus
 │   ├── treinar_modelo.py     ← Treina, avalia e salva o modelo
 │   └── medir_latencia.py     ← Mede a latência da API
 ├── src/
 │   └── triagem/
-│       ├── api.py            ← API FastAPI (/saude e /classificar)
+│       ├── api.py            ← API FastAPI (/saude, /classificar e /metricas)
 │       └── modelo.py         ← Treino, avaliação e inferência
 ├── tests/
-│   └── test_triagem.py       ← 6 testes do modelo e da API
+│   └── test_triagem.py       ← 7 testes do modelo e da API
+├── .env.example              ← Modelo das variáveis de ambiente (copiar para .env)
+├── docker-compose.yml        ← Stack de monitoramento (API + Prometheus + Grafana)
 ├── docker-compose.airflow.yml
 ├── Dockerfile
 ├── pyproject.toml
@@ -129,7 +134,7 @@ O workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) roda a cada push
 | Job | Comando | Papel |
 |---|---|---|
 | `lint` | `ruff check .` | Verificação de código |
-| `testes` | `pytest` | Os 6 testes do modelo e da API |
+| `testes` | `pytest` | Os 7 testes do modelo e da API |
 | `build` | `docker build` | Garante que a imagem continua construindo |
 
 O `build` só roda se lint e testes passarem. Como os dados estão versionados no repositório, o pipeline executa sem rede externa e sem segredos configurados — a imagem é construída para validação, não publicada.
@@ -167,9 +172,61 @@ O Airflow roda em um único container (`apache/airflow:3.3.0` em modo standalone
 
 ---
 
-## 5) Decisão arquitetural de deploy em nuvem
+## 5) Monitoramento e observabilidade (Etapa 3)
 
-### 5.1 Batch ou tempo real?
+### 5.1 Métricas da API
+
+A API é instrumentada com `prometheus_client` por um middleware que registra duas métricas para cada requisição (exceto as do próprio `/metricas`):
+
+| Métrica | Tipo | O que mede |
+|---|---|---|
+| `triagem_requisicoes_total` | Counter | Total de requisições, por rota e status HTTP |
+| `triagem_latencia_segundos` | Histogram | Tempo de resposta, por rota |
+
+As métricas ficam expostas em `GET /metricas`, no formato do Prometheus.
+
+### 5.2 Subir a stack
+
+Antes da primeira subida, crie o `.env` com as credenciais do Grafana (o arquivo fica fora do git):
+
+```bash
+cp .env.example .env
+```
+
+```bash
+docker compose up -d --build
+```
+
+| Serviço | Endereço | Credenciais |
+|---|---|---|
+| API | `http://localhost:8000` | — |
+| Prometheus | `http://localhost:9090` | — |
+| Grafana | `http://localhost:3001` | definidas no `.env` |
+
+Sem o `.env`, o compose se recusa a subir — não existe senha padrão embutida no repositório.
+
+> O Grafana usa a porta 3001 no host para não conflitar com outros serviços comuns na 3000. O Prometheus raspa a API a cada 5 segundos pelo endereço interno `api:8000`.
+
+### 5.3 Dashboard
+
+O Grafana já sobe com o datasource e o dashboard **Triagem de Laudos** provisionados — nenhuma configuração manual é necessária. São três painéis:
+
+1. **Total de requisições** — `sum(triagem_requisicoes_total)`
+2. **Latência (P95 e média)** — quantil sobre os buckets do histograma
+3. **Taxa de erro (%)** — proporção de respostas 4xx/5xx sobre o total
+
+O JSON do dashboard está versionado em [monitoramento/grafana/dashboards/triagem.json](monitoramento/grafana/dashboards/triagem.json).
+
+Para alimentar os gráficos, gere tráfego com:
+```bash
+python scripts/medir_latencia.py --repeticoes 200
+```
+
+---
+
+## 6) Decisão arquitetural de deploy em nuvem
+
+### 6.1 Batch ou tempo real?
 
 A classificação existe para reduzir o tempo entre a liberação do laudo e a leitura por um médico. Um laudo que sinaliza um quadro cardiovascular agudo só tem valor clínico se a informação chegar em segundos — processar em lote de hora em hora anularia o ganho do sistema.
 
@@ -182,7 +239,7 @@ Por isso a escolha é **inferência em tempo real (síncrona) via API REST**, co
 | Integração com o HIS/RIS | Arquivos agendados | Chamada HTTP na liberação do laudo |
 | Custo | Menor por volume | Adequado, o modelo é leve |
 
-### 5.2 Nuvem e serviços escolhidos
+### 6.2 Nuvem e serviços escolhidos
 
 A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com Fargate** atrás de um **Application Load Balancer**:
 
@@ -194,7 +251,7 @@ A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com F
 
 **Por que Fargate e não Lambda ou EC2:** o Lambda sofreria com cold start no carregamento do modelo e o EC2 exigiria gerenciar as instâncias. O Fargate mantém o container quente, escala por demanda e roda exatamente a mesma imagem Docker validada localmente e no CI — o que preserva a paridade entre os ambientes e sustenta as etapas seguintes.
 
-### 5.3 Fluxo da requisição
+### 6.3 Fluxo da requisição
 
 ```text
 HIS/RIS do hospital
@@ -210,7 +267,7 @@ O modelo é carregado uma única vez na inicialização do container e reaprovei
 
 ---
 
-## 6) Resultados
+## 7) Resultados
 
 **Modelo** — TF-IDF + Regressão Logística, avaliado nas 2.888 amostras de teste:
 
@@ -234,26 +291,31 @@ O tempo inclui a ida e volta HTTP; a inferência pura (campo `tempo_ms` da respo
 
 ---
 
-## 7) Checklist
+## 8) Checklist
 
 **Etapa 1**
 
-1. [x] **Decisão arquitetural documentada:** batch vs. tempo real e stack de deploy em nuvem (seção 5).
+1. [x] **Decisão arquitetural documentada:** batch vs. tempo real e stack de deploy em nuvem (seção 6).
 2. [x] **API FastAPI:** recebe o texto do laudo e retorna a classificação.
 3. [x] **Dataset público:** Medical Abstracts TC Corpus, no formato original (seção 2).
 4. [x] **Modelo de classificação de texto:** TF-IDF + Regressão Logística com scikit-learn.
 5. [x] **Container Docker funcional:** imagem que já sobe com o modelo treinado.
-6. [x] **Baseline de latência medido:** medição feita no container (seção 6).
+6. [x] **Baseline de latência medido:** medição feita no container (seção 7).
 
 **Etapa 2**
 
 7. [x] **CI/CD com pelo menos 2 automações:** lint, testes e build da imagem no GitHub Actions.
 8. [x] **DAG do Airflow funcional:** carregamento de dados → treino → salvamento do modelo.
-9. [x] **Testes e lint:** 6 testes com pytest e verificação com ruff, executados a cada push.
+9. [x] **Testes e lint:** 7 testes com pytest e verificação com ruff, executados a cada push.
+
+**Etapa 3**
+
+10. [x] **API instrumentada:** contagem de chamadas e tempo de requisição via `prometheus_client` (seção 5).
+11. [x] **Docker Compose com a stack completa:** API + Prometheus + Grafana subindo juntos.
+12. [x] **Dashboard com 3 painéis:** total de requisições, latência e taxa de erro, provisionado em JSON versionado.
 
 ---
 
-## 8) Próximas etapas
+## 9) Próximas etapas
 
-- **Etapa 3:** instrumentação com `prometheus_client` e stack de monitoramento via Docker Compose.
 - **Etapa 4:** otimização de latência com ONNX Runtime, comparativo com este baseline e vídeo STAR.

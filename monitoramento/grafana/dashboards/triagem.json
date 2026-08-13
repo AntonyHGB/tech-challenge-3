@@ -1,0 +1,57 @@
+{
+  "uid": "triagem",
+  "title": "Triagem de Laudos",
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Total de requisições",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(triagem_requisicoes_total)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Latência (P95 e média)",
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(triagem_latencia_segundos_bucket[1m])) by (le))",
+          "legendFormat": "P95"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(triagem_latencia_segundos_sum[1m])) / sum(rate(triagem_latencia_segundos_count[1m]))",
+          "legendFormat": "Média"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Taxa de erro (%)",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum(triagem_requisicoes_total{status=~\"4..|5..\"}) / sum(triagem_requisicoes_total)"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 39
+}
