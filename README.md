@@ -1,6 +1,6 @@
-﻿# ML Tech Challenge — Fase 3 (Classificação de Laudos Médicos)
+# ML Tech Challenge — Fase 3 (Classificação de Laudos Médicos)
 
-Etapas 1, 2 e 3 — API em Docker, CI/CD no GitHub Actions, pipeline de treino no Airflow e monitoramento com Prometheus e Grafana.
+Projeto completo — API em Docker, CI/CD no GitHub Actions, pipeline de treino no Airflow, monitoramento com Prometheus e Grafana e inferência otimizada com ONNX Runtime.
 
 ---
 
@@ -20,13 +20,15 @@ Etapas 1, 2 e 3 — API em Docker, CI/CD no GitHub Actions, pipeline de treino n
 ├── scripts/
 │   ├── baixar_dataset.py     ← Baixa o corpus
 │   ├── treinar_modelo.py     ← Treina, avalia e salva o modelo
+│   ├── exportar_onnx.py      ← Converte o modelo para ONNX
+│   ├── comparar_latencia.py  ← Compara a inferência original com a ONNX
 │   └── medir_latencia.py     ← Mede a latência da API
 ├── src/
 │   └── triagem/
 │       ├── api.py            ← API FastAPI (/saude, /classificar e /metricas)
 │       └── modelo.py         ← Treino, avaliação e inferência
 ├── tests/
-│   └── test_triagem.py       ← 7 testes do modelo e da API
+│   └── test_triagem.py       ← 8 testes do modelo e da API
 ├── .env.example              ← Modelo das variáveis de ambiente (copiar para .env)
 ├── docker-compose.yml        ← Stack de monitoramento (API + Prometheus + Grafana)
 ├── docker-compose.airflow.yml
@@ -105,7 +107,7 @@ A API responde em `http://127.0.0.1:8000`, com documentação interativa em `/do
 {
   "condicao": "cardiovascular diseases",
   "confianca": 0.7066,
-  "tempo_ms": 1.38
+  "tempo_ms": 1.13
 }
 ```
 
@@ -134,7 +136,7 @@ O workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) roda a cada push
 | Job | Comando | Papel |
 |---|---|---|
 | `lint` | `ruff check .` | Verificação de código |
-| `testes` | `pytest` | Os 7 testes do modelo e da API |
+| `testes` | `pytest` | Os 8 testes do modelo e da API |
 | `build` | `docker build` | Garante que a imagem continua construindo |
 
 O `build` só roda se lint e testes passarem. Como os dados estão versionados no repositório, o pipeline executa sem rede externa e sem segredos configurados — a imagem é construída para validação, não publicada.
@@ -224,9 +226,50 @@ python scripts/medir_latencia.py --repeticoes 200
 
 ---
 
-## 6) Decisão arquitetural de deploy em nuvem
+## 6) Otimização de latência (Etapa 4)
 
-### 6.1 Batch ou tempo real?
+### 6.1 Técnica aplicada
+
+O pipeline treinado (TF-IDF + Regressão Logística) é exportado para **ONNX** com o `skl2onnx` e servido pelo **ONNX Runtime**. A conversão elimina a sobrecarga do Python na inferência: a vetorização e a multiplicação de matrizes passam a rodar em um grafo compilado em C++.
+
+```bash
+python scripts/exportar_onnx.py
+```
+
+A API carrega o `.onnx` na subida — se o arquivo não existir, ele é gerado na primeira execução, como acontece com o `.joblib`. No Docker, a exportação já acontece durante o build.
+
+### 6.2 Comparação
+
+```bash
+python scripts/comparar_latencia.py
+```
+
+Inferência pura (sem HTTP), 300 chamadas sobre laudos do conjunto de teste:
+
+| Modelo | Média | P95 |
+|---|---|---|
+| scikit-learn (`.joblib`) | 0,588 ms | 0,853 ms |
+| ONNX Runtime (`.onnx`) | 0,162 ms | 0,253 ms |
+
+**Ganho de ~3,6x** na média. Em três execuções seguidas o ganho ficou entre 3,6x e 4,2x — a variação vem da carga da máquina, não do modelo.
+
+O arquivo também encolheu: **1,04 MB → 791 KB**.
+
+### 6.3 As previsões continuam as mesmas
+
+A otimização não vale nada se mudar o resultado. O script compara as duas versões nos mesmos 100 laudos antes de medir o tempo:
+
+```text
+Previsões idênticas: 100/100
+```
+
+Há ainda um teste automatizado (`test_onnx_preve_o_mesmo_que_o_modelo_original`) que trava essa garantia no CI.
+
+---
+
+## 7) Decisão arquitetural de deploy em nuvem
+
+### 7.1 Batch ou tempo real?
 
 A classificação existe para reduzir o tempo entre a liberação do laudo e a leitura por um médico. Um laudo que sinaliza um quadro cardiovascular agudo só tem valor clínico se a informação chegar em segundos — processar em lote de hora em hora anularia o ganho do sistema.
 
@@ -239,7 +282,7 @@ Por isso a escolha é **inferência em tempo real (síncrona) via API REST**, co
 | Integração com o HIS/RIS | Arquivos agendados | Chamada HTTP na liberação do laudo |
 | Custo | Menor por volume | Adequado, o modelo é leve |
 
-### 6.2 Nuvem e serviços escolhidos
+### 7.2 Nuvem e serviços escolhidos
 
 A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com Fargate** atrás de um **Application Load Balancer**:
 
@@ -251,7 +294,7 @@ A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com F
 
 **Por que Fargate e não Lambda ou EC2:** o Lambda sofreria com cold start no carregamento do modelo e o EC2 exigiria gerenciar as instâncias. O Fargate mantém o container quente, escala por demanda e roda exatamente a mesma imagem Docker validada localmente e no CI — o que preserva a paridade entre os ambientes e sustenta as etapas seguintes.
 
-### 6.3 Fluxo da requisição
+### 7.3 Fluxo da requisição
 
 ```text
 HIS/RIS do hospital
@@ -267,7 +310,7 @@ O modelo é carregado uma única vez na inicialização do container e reaprovei
 
 ---
 
-## 7) Resultados
+## 8) Resultados
 
 **Modelo** — TF-IDF + Regressão Logística, avaliado nas 2.888 amostras de teste:
 
@@ -276,37 +319,44 @@ O modelo é carregado uma única vez na inicialização do container e reaprovei
 | Acurácia | 0,6001 |
 | F1 macro | 0,6039 |
 
-Com cinco classes, o acaso ficaria em torno de 0,20. A modelagem e a otimização são o foco da Etapa 4; aqui o objetivo é ter um baseline funcional servido em produção.
+Com cinco classes, o acaso ficaria em torno de 0,20. A conversão para ONNX preserva essas métricas — é uma otimização de execução, não de modelagem.
 
-**Latência** — 200 requisições sequenciais contra o container Docker:
+**Inferência** — 300 chamadas diretas, sem HTTP (seção 6):
 
-| Métrica | Resultado |
-|---|---|
-| Média | 3,75 ms |
-| P50 | 3,44 ms |
-| P95 | 5,98 ms |
-| P99 | 10,28 ms |
+| Modelo | Média | P95 |
+|---|---|---|
+| scikit-learn | 0,588 ms | 0,853 ms |
+| ONNX Runtime | 0,162 ms | 0,253 ms |
 
-O tempo inclui a ida e volta HTTP; a inferência pura (campo `tempo_ms` da resposta) fica em torno de 1,4 ms. Esse é o número de referência para a comparação da Etapa 4, depois da conversão para ONNX Runtime.
+**Latência ponta a ponta** — 200 requisições sequenciais contra o container Docker:
+
+| Métrica | Baseline (Etapa 1) | Com ONNX (Etapa 4) |
+|---|---|---|
+| Média | 3,75 ms | 3,27 ms |
+| P50 | 3,44 ms | 3,08 ms |
+| P95 | 5,98 ms | 4,79 ms |
+| P99 | 10,28 ms | 5,40 ms |
+
+O tempo inclui a ida e volta HTTP, que domina o total — por isso o ganho de ~3,6x da inferência aparece diluído aqui. A diferença é mais visível na cauda: o P99 caiu quase pela metade, porque a inferência deixa de disputar o GIL nas requisições mais lentas.
 
 ---
 
-## 8) Checklist
+## 9) Checklist
 
 **Etapa 1**
 
-1. [x] **Decisão arquitetural documentada:** batch vs. tempo real e stack de deploy em nuvem (seção 6).
+1. [x] **Decisão arquitetural documentada:** batch vs. tempo real e stack de deploy em nuvem (seção 7).
 2. [x] **API FastAPI:** recebe o texto do laudo e retorna a classificação.
 3. [x] **Dataset público:** Medical Abstracts TC Corpus, no formato original (seção 2).
 4. [x] **Modelo de classificação de texto:** TF-IDF + Regressão Logística com scikit-learn.
 5. [x] **Container Docker funcional:** imagem que já sobe com o modelo treinado.
-6. [x] **Baseline de latência medido:** medição feita no container (seção 7).
+6. [x] **Baseline de latência medido:** medição feita no container (seção 8).
 
 **Etapa 2**
 
 7. [x] **CI/CD com pelo menos 2 automações:** lint, testes e build da imagem no GitHub Actions.
 8. [x] **DAG do Airflow funcional:** carregamento de dados → treino → salvamento do modelo.
-9. [x] **Testes e lint:** 7 testes com pytest e verificação com ruff, executados a cada push.
+9. [x] **Testes e lint:** 8 testes com pytest e verificação com ruff, executados a cada push.
 
 **Etapa 3**
 
@@ -314,8 +364,15 @@ O tempo inclui a ida e volta HTTP; a inferência pura (campo `tempo_ms` da respo
 11. [x] **Docker Compose com a stack completa:** API + Prometheus + Grafana subindo juntos.
 12. [x] **Dashboard com 3 painéis:** total de requisições, latência e taxa de erro, provisionado em JSON versionado.
 
+**Etapa 4**
+
+13. [x] **Classificador treinado:** TF-IDF + Regressão Logística sobre 11.550 laudos.
+14. [x] **Técnica de otimização aplicada:** exportação para ONNX Runtime (seção 6).
+15. [x] **Comparativo de latência:** original vs. otimizado, com previsões verificadas como idênticas.
+16. [ ] **Vídeo STAR:** link a incluir aqui.
+
 ---
 
-## 9) Próximas etapas
+## 10) Próximas etapas
 
 - **Etapa 4:** otimização de latência com ONNX Runtime, comparativo com este baseline e vídeo STAR.

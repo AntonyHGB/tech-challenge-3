@@ -3,7 +3,9 @@
 from pathlib import Path
 
 import joblib
+import numpy
 import pandas as pd
+from onnxruntime import InferenceSession
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
@@ -14,6 +16,7 @@ ARQUIVO_TREINO = RAIZ / "dados" / "medical_tc_train.csv"
 ARQUIVO_TESTE = RAIZ / "dados" / "medical_tc_test.csv"
 ARQUIVO_ROTULOS = RAIZ / "dados" / "medical_tc_labels.csv"
 ARQUIVO_MODELO = RAIZ / "modelos" / "modelo.joblib"
+ARQUIVO_ONNX = RAIZ / "modelos" / "modelo.onnx"
 
 
 def carregar_laudos(arquivo: Path) -> pd.DataFrame:
@@ -66,3 +69,29 @@ def classificar_laudo(modelo: Pipeline, texto: str) -> tuple[str, float]:
     probabilidades = modelo.predict_proba([texto])[0]
     indice = probabilidades.argmax()
     return str(modelo.classes_[indice]), float(probabilidades[indice])
+
+
+def exportar_onnx() -> Path:
+    """Converte o modelo treinado para ONNX, formato mais rápido na inferência."""
+    from skl2onnx import to_onnx
+    from skl2onnx.common.data_types import StringTensorType
+
+    onnx = to_onnx(
+        carregar_modelo(), initial_types=[("texto", StringTensorType([None, 1]))]
+    )
+    ARQUIVO_ONNX.write_bytes(onnx.SerializeToString())
+    return ARQUIVO_ONNX
+
+
+def carregar_sessao_onnx() -> InferenceSession:
+    """Abre a sessão do ONNX Runtime, exportando o modelo na primeira execução."""
+    if not ARQUIVO_ONNX.exists():
+        exportar_onnx()
+    return InferenceSession(ARQUIVO_ONNX, providers=["CPUExecutionProvider"])
+
+
+def classificar_laudo_onnx(sessao: InferenceSession, texto: str) -> tuple[str, float]:
+    """Retorna a condição prevista pelo modelo ONNX e a confiança."""
+    entrada = {sessao.get_inputs()[0].name: numpy.array([[texto]])}
+    condicao, probabilidades = sessao.run(None, entrada)
+    return str(condicao[0]), float(max(probabilidades[0].values()))
