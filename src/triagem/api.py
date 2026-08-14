@@ -11,10 +11,10 @@ from prometheus_client import (
 )
 from pydantic import BaseModel, Field
 
-from triagem.modelo import carregar_modelo, classificar_laudo
+from triagem.modelo import carregar_sessao_onnx, classificar_laudo_onnx
 
 app = FastAPI(title="Triagem de Laudos", version="0.1.0")
-modelo = carregar_modelo()
+sessao = carregar_sessao_onnx()
 
 REQUISICOES = Counter(
     "triagem_requisicoes_total",
@@ -70,7 +70,7 @@ def expor_metricas() -> Response:
 def classificar(entrada: LaudoEntrada) -> ClassificacaoSaida:
     """Classifica a condição clínica descrita no laudo."""
     inicio = perf_counter()
-    condicao, confianca = classificar_laudo(modelo, entrada.texto)
+    condicao, confianca = classificar_laudo_onnx(sessao, entrada.texto)
     tempo_ms = (perf_counter() - inicio) * 1000
     return ClassificacaoSaida(
         condicao=condicao, confianca=confianca, tempo_ms=tempo_ms

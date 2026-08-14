@@ -2,10 +2,17 @@
 
 from fastapi.testclient import TestClient
 
-from triagem.api import app, modelo
-from triagem.modelo import avaliar_modelo, classificar_laudo
+from triagem.api import app
+from triagem.modelo import (
+    avaliar_modelo,
+    carregar_modelo,
+    carregar_sessao_onnx,
+    classificar_laudo,
+    classificar_laudo_onnx,
+)
 
 cliente = TestClient(app)
+modelo = carregar_modelo()
 
 LAUDO = (
     "Acute myocardial infarction with ST segment elevation and cardiogenic shock "
@@ -27,6 +34,12 @@ def test_metricas_ficam_acima_do_acaso():
     metricas = avaliar_modelo(modelo)
     assert metricas["acuracia"] > 0.40
     assert metricas["f1_macro"] > 0.40
+
+
+def test_onnx_preve_o_mesmo_que_o_modelo_original():
+    sessao = carregar_sessao_onnx()
+    condicao_onnx = classificar_laudo_onnx(sessao, LAUDO)[0]
+    assert condicao_onnx == classificar_laudo(modelo, LAUDO)[0]
 
 
 def test_endpoint_de_saude():
