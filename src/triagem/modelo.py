@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import joblib
-import numpy
 import pandas as pd
 from onnxruntime import InferenceSession
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -92,6 +91,6 @@ def carregar_sessao_onnx() -> InferenceSession:
 
 def classificar_laudo_onnx(sessao: InferenceSession, texto: str) -> tuple[str, float]:
     """Retorna a condição prevista pelo modelo ONNX e a confiança."""
-    entrada = {sessao.get_inputs()[0].name: numpy.array([[texto]])}
+    entrada = {sessao.get_inputs()[0].name: [[texto]]}
     condicao, probabilidades = sessao.run(None, entrada)
     return str(condicao[0]), float(max(probabilidades[0].values()))
