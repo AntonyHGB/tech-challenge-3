@@ -203,7 +203,7 @@ docker compose up -d --build
 |---|---|---|
 | API | `http://localhost:8000` | — |
 | Prometheus | `http://localhost:9090` | — |
-| Grafana | `http://localhost:3001` | definidas no `.env` |
+| Grafana | `http://localhost:3001` | usuário `admin`, senha do `.env` |
 
 Sem o `.env`, o compose se recusa a subir — não existe senha padrão embutida no repositório.
 
@@ -321,13 +321,6 @@ O modelo é carregado uma única vez na inicialização do container e reaprovei
 
 Com cinco classes, o acaso ficaria em torno de 0,20. A conversão para ONNX preserva essas métricas — é uma otimização de execução, não de modelagem.
 
-**Inferência** — 300 chamadas diretas, sem HTTP (seção 6):
-
-| Modelo | Média | P95 |
-|---|---|---|
-| scikit-learn | 0,588 ms | 0,853 ms |
-| ONNX Runtime | 0,162 ms | 0,253 ms |
-
 **Latência ponta a ponta** — 200 requisições sequenciais contra o container Docker:
 
 | Métrica | Baseline (Etapa 1) | Com ONNX (Etapa 4) |
@@ -337,7 +330,7 @@ Com cinco classes, o acaso ficaria em torno de 0,20. A conversão para ONNX pres
 | P95 | 5,98 ms | 4,79 ms |
 | P99 | 10,28 ms | 5,40 ms |
 
-O tempo inclui a ida e volta HTTP, que domina o total — por isso o ganho de ~3,6x da inferência aparece diluído aqui. A diferença é mais visível na cauda: o P99 caiu quase pela metade, porque a inferência deixa de disputar o GIL nas requisições mais lentas.
+O tempo inclui a ida e volta HTTP, que domina o total — por isso o ganho de ~3,6x da inferência (seção 6) aparece diluído aqui. A diferença é mais visível na cauda: o P99 caiu quase pela metade, porque a inferência deixa de disputar o GIL nas requisições mais lentas.
 
 ---
 
@@ -370,9 +363,3 @@ O tempo inclui a ida e volta HTTP, que domina o total — por isso o ganho de ~3
 14. [x] **Técnica de otimização aplicada:** exportação para ONNX Runtime (seção 6).
 15. [x] **Comparativo de latência:** original vs. otimizado, com previsões verificadas como idênticas.
 16. [ ] **Vídeo STAR:** link a incluir aqui.
-
----
-
-## 10) Próximas etapas
-
-- **Etapa 4:** otimização de latência com ONNX Runtime, comparativo com este baseline e vídeo STAR.

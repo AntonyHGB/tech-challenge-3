@@ -1,4 +1,4 @@
-"""Mede a latência baseline da API de triagem rodando em Docker."""
+"""Mede a latência ponta a ponta da API de triagem."""
 
 import argparse
 import statistics
