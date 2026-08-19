@@ -53,6 +53,24 @@ As classes são desbalanceadas (de 1.195 a 3.844 amostras no treino), então o c
 
 ## 3) Como rodar
 
+### 3.0 Caminho rápido
+
+Para ver o projeto inteiro no ar, bastam três comandos — o modelo é treinado e exportado durante o build:
+
+```bash
+cp .env.example .env
+docker compose up -d --build
+docker compose -f docker-compose.airflow.yml up -d
+```
+
+| O que ver | Onde |
+|---|---|
+| API e documentação interativa | `http://localhost:8000/docs` |
+| Dashboard de monitoramento | `http://localhost:3001` (Grafana) |
+| DAG de treino | `http://localhost:8080` (Airflow) |
+
+O restante desta seção cobre a execução local, para desenvolvimento.
+
 ### 3.1 Clonar e preparar o ambiente
 ```bash
 git clone https://github.com/AntonyHGB/tech-challenge-3.git
