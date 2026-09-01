@@ -1,14 +1,19 @@
 """Modelo de classificação de laudos: TF-IDF + Regressão Logística."""
 
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import joblib
 import pandas as pd
-from onnxruntime import InferenceSession
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 from sklearn.pipeline import Pipeline
+
+if TYPE_CHECKING:
+    from onnxruntime import InferenceSession
 
 RAIZ = Path(__file__).resolve().parents[2]
 ARQUIVO_TREINO = RAIZ / "dados" / "medical_tc_train.csv"
@@ -84,6 +89,8 @@ def exportar_onnx() -> Path:
 
 def carregar_sessao_onnx() -> InferenceSession:
     """Abre a sessão do ONNX Runtime, exportando o modelo na primeira execução."""
+    from onnxruntime import InferenceSession
+
     if not ARQUIVO_ONNX.exists():
         exportar_onnx()
     return InferenceSession(ARQUIVO_ONNX, providers=["CPUExecutionProvider"])

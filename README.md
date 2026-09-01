@@ -63,6 +63,9 @@ docker compose up -d --build
 docker compose -f docker-compose.airflow.yml up -d
 ```
 
+No Linux/WSL, confirme que `AIRFLOW_UID` no `.env` corresponde ao resultado de
+`id -u`; isso permite que a DAG grave o modelo no bind mount `modelos/`.
+
 | O que ver | Onde |
 |---|---|
 | API e documentação interativa | `http://localhost:8000/docs` |
