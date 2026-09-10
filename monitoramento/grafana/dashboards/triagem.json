@@ -48,7 +48,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * sum(triagem_requisicoes_total{status=~\"4..|5..\"}) / sum(triagem_requisicoes_total)"
+          "expr": "100 * (sum(rate(triagem_requisicoes_total{status=~\"4..|5..\"}[5m])) or vector(0)) / clamp_min((sum(rate(triagem_requisicoes_total[5m])) or vector(0)), 1e-12)"
         }
       ]
     }

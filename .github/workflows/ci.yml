@@ -16,7 +16,7 @@ jobs:
         with:
           python-version: "3.12"
       # O ruff é um binário independente: não precisa do projeto instalado.
-      - run: pip install ruff
+      - run: pip install ruff==0.16.5
       - run: ruff check .
 
   testes:
@@ -28,7 +28,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -c requirements-modelo.txt -e ".[dev]"
       - run: pytest
 
   build:
@@ -38,3 +38,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: docker build -t triagem-laudos .
+      - name: Validar configuração e iniciar API
+        env:
+          GRAFANA_ADMIN_PASSWORD: ci-local-only
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.airflow.yml config --quiet
+          docker run -d --name triagem-smoke -p 8000:8000 triagem-laudos
+          for tentativa in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8000/pronto; then break; fi
+            sleep 2
+          done
+          curl --fail http://localhost:8000/pronto
+          curl --fail -H 'Content-Type: application/json' \
+            -d '{"texto":"Acute myocardial infarction"}' \
+            http://localhost:8000/classificar
+          curl --fail http://localhost:8000/metricas
+      - name: Encerrar smoke test
+        if: always()
+        run: docker rm -f triagem-smoke || true
