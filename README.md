@@ -380,7 +380,7 @@ todas as combinações de caracteres Unicode.
 
 ---
 
-## 7) Decisão arquitetural de deploy em nuvem
+## 7) Decisão arquitetural
 
 ### 7.1 Batch ou tempo real?
 
@@ -395,32 +395,15 @@ Por isso a escolha é **inferência em tempo real (síncrona) via API REST**. O 
 | Integração com o HIS/RIS | Arquivos agendados | Chamada HTTP na liberação do laudo |
 | Custo | Menor por volume | Adequado, o modelo é leve |
 
-### 7.2 Nuvem e serviços escolhidos
+### 7.2 Deploy em nuvem (referência teórica)
 
-A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com Fargate** atrás de um **Application Load Balancer**:
-
-- **Amazon ECR** — registro da imagem construída pelo pipeline de CI/CD (Etapa 2).
-- **Amazon ECS + Fargate** — execução do container sem gerenciar servidores, com escalonamento horizontal por CPU e por número de requisições.
-- **Application Load Balancer** — distribuição de carga, terminação TLS e health check apontando para `GET /pronto`.
-- **Amazon S3** — armazenamento do modelo serializado versionado, consumido na subida do container.
-- **Amazon CloudWatch** — logs e alarmes, complementando o Prometheus e o Grafana da Etapa 3.
-
-**Por que Fargate e não Lambda ou EC2:** o Lambda sofreria com cold start no carregamento do modelo e o EC2 exigiria gerenciar as instâncias. O Fargate mantém o container quente, escala por demanda e roda exatamente a mesma imagem Docker validada localmente e no CI — o que preserva a paridade entre os ambientes e sustenta as etapas seguintes.
-
-### 7.3 Fluxo da requisição
-
-```text
-HIS/RIS do hospital
-        │  POST /classificar { texto do laudo }
-        ▼
-Application Load Balancer ──► ECS Fargate (container FastAPI)
-                                     │
-                                     ├─► modelo TF-IDF + Regressão Logística em memória
-                                     └─► resposta { condicao, confianca, tempo_ms }
-```
-
-A sessão do modelo é reaproveitada entre requisições e recarregada somente quando
-uma nova versão é publicada no diretório compartilhado.
+O deploy executado neste projeto é local, via Docker. Como referência teórica,
+a mesma imagem subiria em um serviço de containers gerenciado (ex.: AWS ECS
+com Fargate), atrás de um balanceador com health check em `GET /pronto`, com o
+modelo versionado em object storage e logs centralizados. O fluxo é
+`POST /classificar` → container FastAPI → resposta
+`{ condicao, confianca, tempo_ms }`, reaproveitando a sessão ONNX entre
+requisições.
 
 ---
 
@@ -446,35 +429,3 @@ requisições sequenciais contra o container Docker:
 | P99 | 10,28 ms | 5,40 ms |
 
 O tempo inclui a ida e volta HTTP, que domina o total — por isso o ganho de ~3,6x da inferência (seção 6) aparece diluído aqui. A diferença é mais visível na cauda: o P99 caiu quase pela metade, porque a inferência deixa de disputar o GIL nas requisições mais lentas.
-
----
-
-## 9) Checklist
-
-**Etapa 1**
-
-1. [x] **Decisão arquitetural documentada:** batch vs. tempo real e stack de deploy em nuvem (seção 7).
-2. [x] **API FastAPI:** recebe o texto do laudo e retorna a classificação.
-3. [x] **Dataset público:** Medical Abstracts TC Corpus, no formato original (seção 2).
-4. [x] **Modelo de classificação de texto:** TF-IDF + Regressão Logística com scikit-learn.
-5. [x] **Container Docker funcional:** imagem que já sobe com o modelo treinado.
-6. [x] **Baseline de latência medido:** medição feita no container (seção 8).
-
-**Etapa 2**
-
-7. [x] **CI/CD com pelo menos 2 automações:** lint, testes e build da imagem no GitHub Actions.
-8. [x] **DAG do Airflow funcional:** carregamento de dados → treino → salvamento do modelo.
-9. [x] **Testes e lint:** testes de regressão com pytest e verificação com ruff, executados a cada push.
-
-**Etapa 3**
-
-10. [x] **API instrumentada:** contagem de chamadas e tempo de requisição via `prometheus_client` (seção 5).
-11. [x] **Docker Compose com a stack completa:** API + Prometheus + Grafana subindo juntos.
-12. [x] **Dashboard com 3 painéis:** total de requisições, latência e taxa de erro, provisionado em JSON versionado.
-
-**Etapa 4**
-
-13. [x] **Classificador treinado:** TF-IDF + Regressão Logística sobre 11.550 laudos.
-14. [x] **Técnica de otimização aplicada:** exportação para ONNX Runtime (seção 6).
-15. [x] **Comparativo de latência:** original vs. otimizado, com previsões verificadas como idênticas.
-16. [ ] **Vídeo STAR:** link a incluir aqui.
