@@ -46,10 +46,10 @@ jobs:
           docker compose -f docker-compose.airflow.yml config --quiet
           docker run -d --name triagem-smoke -p 8000:8000 triagem-laudos
           for tentativa in $(seq 1 30); do
-            if curl --fail --silent http://localhost:8000/pronto; then break; fi
+            if curl --fail --silent http://localhost:8000/saude; then break; fi
             sleep 2
           done
-          curl --fail http://localhost:8000/pronto
+          curl --fail http://localhost:8000/saude
           curl --fail -H 'Content-Type: application/json' \
             -d '{"texto":"Acute myocardial infarction"}' \
             http://localhost:8000/classificar

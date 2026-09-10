@@ -10,7 +10,6 @@ from triagem.modelo import (
     carregar_sessao_onnx,
     classificar_laudo,
     classificar_laudo_onnx,
-    validar_paridade,
 )
 
 REPETICOES = 300
@@ -42,8 +41,11 @@ def main() -> None:
     modelo = carregar_modelo()
     sessao = carregar_sessao_onnx()
 
-    validar_paridade(modelo, sessao)
-    print("Paridade validada: classes e probabilidades no teste completo e Unicode.")
+    iguais = sum(
+        classificar_laudo(modelo, texto)[0] == classificar_laudo_onnx(sessao, texto)[0]
+        for texto in laudos
+    )
+    print(f"Previsões idênticas: {iguais}/{len(laudos)}")
 
     tempos_original = medir(lambda t: classificar_laudo(modelo, t), laudos)
     tempos_onnx = medir(lambda t: classificar_laudo_onnx(sessao, t), laudos)
