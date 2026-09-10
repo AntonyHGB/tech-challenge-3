@@ -14,7 +14,6 @@ services:
       AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "2"
       # O pacote triagem é lido de src/, junto com dados/ e modelos/.
       PYTHONPATH: /opt/airflow/src
-      MODELOS_DIR: /opt/airflow/modelos
     volumes:
       - ./dags:/opt/airflow/dags
       - ./src:/opt/airflow/src:ro

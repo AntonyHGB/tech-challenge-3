@@ -2,10 +2,6 @@ services:
   api:
     build: .
     restart: unless-stopped
-    environment:
-      MODELOS_DIR: /app/modelos-publicados
-    volumes:
-      - ./modelos:/app/modelos-publicados:ro
     ports:
       - "8000:8000"
 
