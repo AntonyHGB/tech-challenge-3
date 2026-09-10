@@ -1,6 +1,9 @@
 services:
   airflow:
-    image: apache/airflow:3.3.0
+    build:
+      context: .
+      dockerfile: Dockerfile.airflow
+    restart: unless-stopped
     user: "${AIRFLOW_UID:-50000}:0"
     command: standalone
     ports:
@@ -11,9 +14,9 @@ services:
       AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: "2"
       # O pacote triagem é lido de src/, junto com dados/ e modelos/.
       PYTHONPATH: /opt/airflow/src
-      _PIP_ADDITIONAL_REQUIREMENTS: "scikit-learn joblib"
+      MODELOS_DIR: /opt/airflow/modelos
     volumes:
       - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src
-      - ./dados:/opt/airflow/dados
+      - ./src:/opt/airflow/src:ro
+      - ./dados:/opt/airflow/dados:ro
       - ./modelos:/opt/airflow/modelos

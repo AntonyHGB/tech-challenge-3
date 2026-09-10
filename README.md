@@ -13,7 +13,7 @@ Projeto completo — API em Docker, CI/CD no GitHub Actions, pipeline de treino 
 ├── dados/                    ← Corpus público, no formato original
 ├── dags/
 │   └── treino_laudos.py      ← DAG do Airflow com o pipeline de treino
-├── modelos/                  ← Modelo serializado (gerado pelo treino, fora do git)
+├── modelos/                  ← Versões .joblib/.onnx e manifesto atual.json (fora do git)
 ├── monitoramento/
 │   ├── prometheus.yml        ← Configuração de scrape do Prometheus
 │   └── grafana/              ← Datasource e dashboard provisionados
@@ -25,14 +25,17 @@ Projeto completo — API em Docker, CI/CD no GitHub Actions, pipeline de treino 
 │   └── medir_latencia.py     ← Mede a latência da API
 ├── src/
 │   └── triagem/
-│       ├── api.py            ← API FastAPI (/saude, /classificar e /metricas)
+│       ├── api.py            ← API FastAPI (/saude, /pronto, /classificar e /metricas)
 │       └── modelo.py         ← Treino, avaliação e inferência
 ├── tests/
-│   └── test_triagem.py       ← 8 testes do modelo e da API
+│   ├── test_triagem.py       ← Testes do modelo, API e métricas
+│   └── test_publicacao.py    ← Promoção, falhas e recarga do modelo
 ├── .env.example              ← Modelo das variáveis de ambiente (copiar para .env)
 ├── docker-compose.yml        ← Stack de monitoramento (API + Prometheus + Grafana)
 ├── docker-compose.airflow.yml
 ├── Dockerfile
+├── Dockerfile.airflow
+├── requirements-modelo.txt   ← Versões da stack de ML compartilhada
 ├── pyproject.toml
 └── README.md
 ```
@@ -49,22 +52,56 @@ O corpus classifica **condição médica**, e não nível de urgência como no e
 
 As classes são desbalanceadas (de 1.195 a 3.844 amostras no treino), então o classificador usa `class_weight="balanced"`, que dá peso maior às classes menos frequentes durante o treino.
 
+**Limitação do benchmark:** 1.010 das 2.888 linhas de teste (34,97%) contêm textos
+também presentes no treino, com rótulos diferentes. Há textos associados a mais de
+uma condição no corpus, enquanto este projeto produz uma única classe. As métricas
+abaixo usam o split original e não medem exclusivamente generalização para textos
+inéditos; a auditoria dessa sobreposição não demonstrou inflação das métricas.
+
 ---
 
 ## 3) Como rodar
 
-### 3.0 Caminho rápido
+### Pré-requisitos
 
-Para ver o projeto inteiro no ar, bastam três comandos — o modelo é treinado e exportado durante o build:
+| Ferramenta | Windows | Linux |
+|---|---|---|
+| Python 3.12+ | [python.org](https://www.python.org/downloads/) ou `winget install Python.Python.3.12` | `sudo apt install python3.12 python3.12-venv python3-pip` (Debian/Ubuntu) |
+| Git | [git-scm.com](https://git-scm.com/) ou `winget install Git.Git` | `sudo apt install git` |
+| Docker | [Docker Desktop](https://www.docker.com/products/docker-desktop/) com backend WSL2 | Docker Engine + plugin Compose |
+| curl | já incluído no Windows 10/11 | `sudo apt install curl` |
 
+Confira a instalação (exige Python ≥ 3.12):
+
+```bash
+python --version
+git --version
+docker --version
+docker compose version
+```
+
+> No Windows, `python` pode se chamar `py` — use `py --version` e troque `python` por `py` nos comandos abaixo.
+
+### 3.0 Caminho rápido (Docker)
+
+O modelo é treinado e exportado durante o build — três comandos e o projeto inteiro sobe:
+
+**Linux:**
 ```bash
 cp .env.example .env
 docker compose up -d --build
-docker compose -f docker-compose.airflow.yml up -d
+docker compose -f docker-compose.airflow.yml up -d --build
 ```
 
-No Linux/WSL, confirme que `AIRFLOW_UID` no `.env` corresponde ao resultado de
-`id -u`; isso permite que a DAG grave o modelo no bind mount `modelos/`.
+**Windows (PowerShell):**
+```powershell
+Copy-Item .env.example .env
+docker compose up -d --build
+docker compose -f docker-compose.airflow.yml up -d --build
+```
+
+- No Linux/WSL, ajuste `AIRFLOW_UID` no `.env` para o resultado de `id -u`; isso permite que a DAG grave o modelo no bind mount `modelos/`.
+- No Windows com Docker Desktop, o valor padrão já funciona — nenhum ajuste necessário.
 
 | O que ver | Onde |
 |---|---|
@@ -75,18 +112,32 @@ No Linux/WSL, confirme que `AIRFLOW_UID` no `.env` corresponde ao resultado de
 O restante desta seção cobre a execução local, para desenvolvimento.
 
 ### 3.1 Clonar e preparar o ambiente
+
+**Linux:**
 ```bash
 git clone https://github.com/AntonyHGB/tech-challenge-3.git
 cd tech-challenge-3
-python -m venv .venv
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -c requirements-modelo.txt -e ".[dev]"
 ```
 
-**Windows (PowerShell):** `.venv\Scripts\Activate.ps1`
-**Linux / macOS:** `source .venv/bin/activate`
-
-```bash
-pip install -e ".[dev]"
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/AntonyHGB/tech-challenge-3.git
+cd tech-challenge-3
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -c requirements-modelo.txt -e ".[dev]"
 ```
+
+> Se o Windows bloquear a ativação do ambiente, libere só para o seu usuário e tente de novo:
+> ```powershell
+> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+> .venv\Scripts\Activate.ps1
+> ```
+>
+> O Airflow não roda nativamente no Windows — use-o sempre via Docker (seção 3.0 ou 4.2).
 
 ### 3.2 Treinar o modelo
 ```bash
@@ -96,7 +147,7 @@ python scripts/treinar_modelo.py
 ```text
 Acurácia: 0.6001
 F1 macro: 0.6039
-Modelo salvo em .../modelos/modelo.joblib
+Modelo salvo em .../modelos/versao-.../modelo.joblib
 ```
 
 Os CSVs já estão versionados. Para baixar o corpus novamente: `python scripts/baixar_dataset.py`.
@@ -134,6 +185,10 @@ A API responde em `http://127.0.0.1:8000`, com documentação interativa em `/do
 
 > O corpus é composto por textos em inglês, então o modelo espera laudos nesse idioma.
 
+O campo `texto` aceita até 50.000 caracteres. Texto vazio, somente espaços ou
+Unicode malformado retorna **422**. `GET /saude` verifica liveness; `GET /pronto`
+executa uma inferência e informa a versão ativa, retornando **503** se indisponível.
+
 ### 3.4 Medir a latência
 Com a API rodando, em outro terminal:
 ```bash
@@ -157,10 +212,13 @@ O workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) roda a cada push
 | Job | Comando | Papel |
 |---|---|---|
 | `lint` | `ruff check .` | Verificação de código |
-| `testes` | `pytest` | Os 8 testes do modelo e da API |
-| `build` | `docker build` | Garante que a imagem continua construindo |
+| `testes` | `pytest` | Modelo, API, métricas, promoção e recarga |
+| `build` | `docker build` + smoke test HTTP | Valida construção, prontidão, classificação e métricas |
 
-O `build` só roda se lint e testes passarem. Como os dados estão versionados no repositório, o pipeline executa sem rede externa e sem segredos configurados — a imagem é construída para validação, não publicada.
+O `build` só roda se lint e testes passarem. Os dados estão versionados, dispensando
+seu download; imagens e dependências ainda exigem rede em um ambiente limpo. A
+imagem é construída e iniciada para validação, sem publicação. A suíte gera seus
+artefatos em diretórios temporários, sem depender de `modelos/` do checkout.
 
 ### 4.2 DAG do Airflow
 
@@ -169,14 +227,28 @@ A DAG [dags/treino_laudos.py](dags/treino_laudos.py) reproduz o ciclo de treino 
 ```text
 carregar_dados  →  treinar  →  salvar_modelo
  (lê o CSV e       (TF-IDF +   (avalia e promove
-  conta laudos)     LogReg)     para modelo.joblib)
+  conta laudos)     LogReg)     versão joblib + ONNX)
 ```
 
-A task `treinar` grava em um arquivo temporário e só a `salvar_modelo` promove o resultado para `modelos/modelo.joblib`, depois de calcular as métricas. Assim uma execução que falhe no meio não corrompe o modelo que a API está servindo.
+A task `treinar` usa um candidato temporário exclusivo. A DAG admite uma execução
+ativa por vez. A task `salvar_modelo` exige **acurácia e F1 macro acima de 0,40**
+(limiar já utilizado nos testes), exporta o ONNX e verifica classes e probabilidades
+em todo o teste e em casos Unicode de regressão.
+
+Os dois artefatos são gravados em `modelos/versao-.../`. Somente após todas as
+validações e gravações, uma troca atômica de `modelos/atual.json` ativa a versão.
+Falhas anteriores à ativação preservam a versão vigente. Versões antigas são
+mantidas; não há limpeza automática. Esse limiar é um critério técnico do projeto,
+não um critério de aprovação clínica.
+
+O Airflow grava no diretório compartilhado e a API o monta em **somente leitura**.
+A API detecta a versão ativa a cada requisição e reutiliza a sessão ONNX enquanto
+ela não muda. Após a promoção, a próxima requisição carrega o novo ONNX sem restart.
+Antes da primeira publicação compartilhada, utiliza o modelo validado da imagem.
 
 **Subir o Airflow:**
 ```bash
-docker compose -f docker-compose.airflow.yml up -d
+docker compose -f docker-compose.airflow.yml up -d --build
 ```
 
 A interface fica em `http://localhost:8080`. O usuário é `admin` e a senha é gerada na primeira subida — procure pela linha `Password for user 'admin'` na saída de:
@@ -189,7 +261,11 @@ docker compose -f docker-compose.airflow.yml logs airflow
 docker compose -f docker-compose.airflow.yml exec airflow airflow dags test treino_laudos
 ```
 
-O Airflow roda em um único container (`apache/airflow:3.3.0` em modo standalone, com SQLite), suficiente para esta DAG e bem mais simples de subir que o compose oficial de seis serviços. As pastas `src/`, `dados/` e `modelos/` são montadas como volumes, então a DAG usa o mesmo código da API, sem duplicar a lógica de treino.
+O Airflow roda em um único container (imagem derivada de `apache/airflow:3.3.0`,
+em modo standalone com SQLite). As dependências de ML são instaladas no build pelo
+`Dockerfile.airflow`, com as mesmas versões usadas na API em
+`requirements-modelo.txt`; não há instalação pip a cada inicialização. As pastas
+`src/`, `dados/` e `modelos/` são montadas como volumes.
 
 > O `apache-airflow` não faz parte das dependências do projeto: ele não roda nativamente no Windows e pesaria o CI sem necessidade. A DAG é executada no container.
 
@@ -200,6 +276,9 @@ O Airflow roda em um único container (`apache/airflow:3.3.0` em modo standalone
 ### 5.1 Métricas da API
 
 A API é instrumentada com `prometheus_client` por um middleware que registra duas métricas para cada requisição (exceto as do próprio `/metricas`):
+
+Exceções internas também registram status 500 e latência. Caminhos inexistentes
+compartilham o label `nao_encontrada`, evitando uma série por URL arbitrária.
 
 | Métrica | Tipo | O que mede |
 |---|---|---|
@@ -236,7 +315,8 @@ O Grafana já sobe com o datasource e o dashboard **Triagem de Laudos** provisio
 
 1. **Total de requisições** — `sum(triagem_requisicoes_total)`
 2. **Latência (P95 e média)** — quantil sobre os buckets do histograma
-3. **Taxa de erro (%)** — proporção de respostas 4xx/5xx sobre o total
+3. **Taxa de erro (%)** — proporção de respostas 4xx/5xx nos últimos 5 minutos,
+   mostrando zero quando não há erros ou tráfego
 
 O JSON do dashboard está versionado em [monitoramento/grafana/dashboards/triagem.json](monitoramento/grafana/dashboards/triagem.json).
 
@@ -251,13 +331,21 @@ python scripts/medir_latencia.py --repeticoes 200
 
 ### 6.1 Técnica aplicada
 
-O pipeline treinado (TF-IDF + Regressão Logística) é exportado para **ONNX** com o `skl2onnx` e servido pelo **ONNX Runtime**. A conversão elimina a sobrecarga do Python na inferência: a vetorização e a multiplicação de matrizes passam a rodar em um grafo compilado em C++.
+O pipeline treinado (TF-IDF + Regressão Logística) é exportado para **ONNX** com o
+`skl2onnx` e servido pelo **ONNX Runtime**. A vetorização e a classificação rodam
+no grafo compilado; o lowercase usa `str.lower()` do Python, declarado nos metadados
+do artefato e aplicado por `classificar_laudo_onnx`. A expressão de tokenização ONNX
+inclui letras e números Unicode, preservando termos como `naïve`.
 
 ```bash
 python scripts/exportar_onnx.py
 ```
 
-A API carrega o `.onnx` na subida — se o arquivo não existir, ele é gerado na primeira execução, como acontece com o `.joblib`. No Docker, a exportação já acontece durante o build.
+A API carrega a versão ativa na subida e recarrega após uma promoção. O comando de
+treino já publica `.joblib` e `.onnx`; `exportar_onnx.py` republica o modelo atual
+com a conversão vigente e as mesmas validações. No Docker, o modelo inicial é
+gerado durante o build. Artefatos locais antigos podem ser migrados executando
+`python scripts/exportar_onnx.py`.
 
 ### 6.2 Comparação
 
@@ -265,7 +353,7 @@ A API carrega o `.onnx` na subida — se o arquivo não existir, ele é gerado n
 python scripts/comparar_latencia.py
 ```
 
-Inferência pura (sem HTTP), 300 chamadas sobre laudos do conjunto de teste:
+Medição histórica anterior às correções de tokenização, sem HTTP, com 300 chamadas:
 
 | Modelo | Média | P95 |
 |---|---|---|
@@ -278,13 +366,17 @@ O arquivo também encolheu: **1,04 MB → 791 KB**.
 
 ### 6.3 As previsões continuam as mesmas
 
-A otimização não vale nada se mudar o resultado. O script compara as duas versões nos mesmos 100 laudos antes de medir o tempo:
+A publicação e o comparador verificam as duas versões nos 2.888 laudos de teste e
+em casos Unicode de regressão. Classes devem coincidir; probabilidades usam
+tolerância absoluta de `1e-6` e relativa de `1e-5`. Divergências interrompem o comando:
 
 ```text
-Previsões idênticas: 100/100
+Paridade validada: classes e probabilidades no teste completo e Unicode.
 ```
 
-Há ainda um teste automatizado (`test_onnx_preve_o_mesmo_que_o_modelo_original`) que trava essa garantia no CI.
+O teste `test_paridade_no_corpus_completo_e_regressoes_unicode` cobre essa verificação
+no CI. A equivalência foi testada nessas entradas, sem garantia universal para
+todas as combinações de caracteres Unicode.
 
 ---
 
@@ -294,7 +386,7 @@ Há ainda um teste automatizado (`test_onnx_preve_o_mesmo_que_o_modelo_original`
 
 A classificação existe para reduzir o tempo entre a liberação do laudo e a leitura por um médico. Um laudo que sinaliza um quadro cardiovascular agudo só tem valor clínico se a informação chegar em segundos — processar em lote de hora em hora anularia o ganho do sistema.
 
-Por isso a escolha é **inferência em tempo real (síncrona) via API REST**, com o processamento em lote mantido apenas como caminho secundário para reprocessar históricos quando um novo modelo é promovido.
+Por isso a escolha é **inferência em tempo real (síncrona) via API REST**. O processamento em lote seria uma opção futura para reprocessar históricos quando um novo modelo for promovido.
 
 | Critério | Batch | Tempo real (escolhido) |
 |---|---|---|
@@ -309,7 +401,7 @@ A arquitetura alvo é a **AWS**, com o container publicado em **Amazon ECS com F
 
 - **Amazon ECR** — registro da imagem construída pelo pipeline de CI/CD (Etapa 2).
 - **Amazon ECS + Fargate** — execução do container sem gerenciar servidores, com escalonamento horizontal por CPU e por número de requisições.
-- **Application Load Balancer** — distribuição de carga, terminação TLS e health check apontando para `GET /saude`.
+- **Application Load Balancer** — distribuição de carga, terminação TLS e health check apontando para `GET /pronto`.
 - **Amazon S3** — armazenamento do modelo serializado versionado, consumido na subida do container.
 - **Amazon CloudWatch** — logs e alarmes, complementando o Prometheus e o Grafana da Etapa 3.
 
@@ -327,7 +419,8 @@ Application Load Balancer ──► ECS Fargate (container FastAPI)
                                      └─► resposta { condicao, confianca, tempo_ms }
 ```
 
-O modelo é carregado uma única vez na inicialização do container e reaproveitado entre as requisições, evitando o custo de desserialização a cada chamada.
+A sessão do modelo é reaproveitada entre requisições e recarregada somente quando
+uma nova versão é publicada no diretório compartilhado.
 
 ---
 
@@ -342,7 +435,8 @@ O modelo é carregado uma única vez na inicialização do container e reaprovei
 
 Com cinco classes, o acaso ficaria em torno de 0,20. A conversão para ONNX preserva essas métricas — é uma otimização de execução, não de modelagem.
 
-**Latência ponta a ponta** — 200 requisições sequenciais contra o container Docker:
+**Latência ponta a ponta histórica, anterior às correções desta revisão** — 200
+requisições sequenciais contra o container Docker:
 
 | Métrica | Baseline (Etapa 1) | Com ONNX (Etapa 4) |
 |---|---|---|
@@ -370,7 +464,7 @@ O tempo inclui a ida e volta HTTP, que domina o total — por isso o ganho de ~3
 
 7. [x] **CI/CD com pelo menos 2 automações:** lint, testes e build da imagem no GitHub Actions.
 8. [x] **DAG do Airflow funcional:** carregamento de dados → treino → salvamento do modelo.
-9. [x] **Testes e lint:** 8 testes com pytest e verificação com ruff, executados a cada push.
+9. [x] **Testes e lint:** testes de regressão com pytest e verificação com ruff, executados a cada push.
 
 **Etapa 3**
 
