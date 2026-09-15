@@ -184,7 +184,7 @@ A API responde em `http://127.0.0.1:8000`, com documentação interativa em `/do
 
 > O corpus é composto por textos em inglês, então o modelo espera laudos nesse idioma.
 
-Texto vazio retorna **422**. `GET /saude` verifica se o serviço está no ar.
+Texto vazio ou composto apenas por espaços retorna **422**. `GET /saude` verifica se o serviço está no ar.
 
 ### 3.4 Medir a latência
 Com a API rodando, em outro terminal:
@@ -209,7 +209,7 @@ O workflow [.github/workflows/ci.yml](.github/workflows/ci.yml) roda a cada push
 | Job | Comando | Papel |
 |---|---|---|
 | `lint` | `ruff check .` | Verificação de código |
-| `testes` | `pytest` | Modelo, API, métricas, promoção e recarga |
+| `testes` | `pytest` | Modelo, API, métricas e equivalência ONNX em 100 textos |
 | `build` | `docker build` + smoke test HTTP | Valida construção, saúde, classificação e métricas |
 
 O `build` só roda se lint e testes passarem. Os dados estão versionados, dispensando
@@ -228,7 +228,16 @@ carregar_dados  →  treinar
 ```
 
 A task `treinar` avalia no conjunto de teste e grava os dois artefatos em
-`modelos/`. Após um retreino, basta reiniciar a API para servir o novo modelo.
+`modelos/`. A API executada localmente usa essa pasta: reinicie o Uvicorn após
+o retreino para carregar o novo modelo.
+
+A API no Docker usa o modelo treinado dentro da imagem durante o build; não
+compartilha a pasta do Airflow. Para refazer esse treino e recriar a API:
+
+```bash
+docker compose build --no-cache api
+docker compose up -d api
+```
 
 **Subir o Airflow:**
 ```bash
@@ -267,6 +276,9 @@ A API é instrumentada com `prometheus_client` por um middleware que registra du
 | `triagem_latencia_segundos` | Histogram | Tempo de resposta, por rota |
 
 As métricas ficam expostas em `GET /metricas`, no formato do Prometheus.
+O histograma inclui intervalos de 0,5 ms, 1 ms e 2,5 ms para distinguir as
+respostas rápidas da API. O P95 do Grafana é uma estimativa por intervalos;
+o script de latência calcula os percentis das medições individuais.
 
 ### 5.2 Subir a stack
 
@@ -359,9 +371,10 @@ que trava essa garantia no CI.
 
 ### 7.1 Batch ou tempo real?
 
-A classificação existe para reduzir o tempo entre a liberação do laudo e a leitura por um médico. Um laudo que sinaliza um quadro cardiovascular agudo só tem valor clínico se a informação chegar em segundos — processar em lote de hora em hora anularia o ganho do sistema.
-
-Por isso a escolha é **inferência em tempo real (síncrona) via API REST**. O processamento em lote seria uma opção futura para reprocessar históricos quando um novo modelo for promovido.
+A escolha é **inferência em tempo real (síncrona) via API REST**: cada texto
+recebe uma classificação imediatamente, sem esperar um lote agendado. Batch
+seria adequado para reprocessar históricos. Este protótipo classifica condições
+médicas em textos em inglês; não determina urgência nem foi validado para uso clínico.
 
 | Critério | Batch | Tempo real (escolhido) |
 |---|---|---|

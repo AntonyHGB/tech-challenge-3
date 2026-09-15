@@ -9,7 +9,7 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from triagem.modelo import carregar_sessao_onnx, classificar_laudo_onnx
 
@@ -25,6 +25,7 @@ LATENCIA = Histogram(
     "triagem_latencia_segundos",
     "Tempo de resposta das requisições em segundos.",
     ["rota"],
+    buckets=(0.0005, 0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.5, 1, 5),
 )
 
 
@@ -46,6 +47,8 @@ async def medir_requisicoes(request: Request, chamar_rota):
 
 class LaudoEntrada(BaseModel):
     """Laudo médico enviado para classificação."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
 
     texto: str = Field(min_length=1, description="Texto do laudo médico em inglês.")
 
